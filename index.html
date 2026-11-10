@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Gemini">
+<title>چت با Gemini</title>
+<style>
+:root{--bg:#f3f5f7;--panel:#fff;--ink:#16202a;--mute:#6a7783;--line:#dde3e8;--me:#1f4e5f;--meink:#fff;--bot:#fff;--accent:#1f4e5f}
+@media (prefers-color-scheme:dark){:root{--bg:#10171c;--panel:#18222a;--ink:#e6edf2;--mute:#8a99a5;--line:#27343e;--me:#2f7a93;--meink:#fff;--bot:#1d2a33;--accent:#5fb3cc}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.7 -apple-system,"SF Pro Text","Vazirmatn",Tahoma,sans-serif;display:flex;flex-direction:column;height:-webkit-fill-available;min-height:-webkit-fill-available}
+header{display:flex;align-items:center;justify-content:space-between;padding:calc(10px + env(safe-area-inset-top,0px)) 14px 10px;background:var(--panel);border-bottom:1px solid var(--line)}
+header b{font-size:17px}
+header button{background:none;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 12px;font:inherit;font-size:14px;margin-right:6px}
+#log{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px}
+.msg{max-width:88%;padding:10px 14px;margin:0 0 12px;border-radius:14px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}
+.me{background:var(--me);color:var(--meink);margin-left:auto;border-bottom-right-radius:4px}
+.bot{background:var(--bot);border:1px solid var(--line);margin-right:auto;border-bottom-left-radius:4px}
+.err{background:none;border:1px dashed #c0504d;color:#c0504d;margin-right:auto}
+.empty{color:var(--mute);text-align:center;margin-top:30vh;padding:0 24px}
+form{display:flex;padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));background:var(--panel);border-top:1px solid var(--line)}
+textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;background:var(--bg);color:var(--ink);max-height:140px;margin-left:8px}
+#send{border:0;border-radius:12px;background:var(--accent);color:#fff;font:inherit;font-weight:600;padding:0 18px}
+#send:disabled{opacity:.5}
+#cfg{display:none;padding:14px;background:var(--panel);border-bottom:1px solid var(--line)}
+#cfg.open{display:block}
+#cfg label{display:block;font-size:14px;color:var(--mute);margin:8px 0 4px}
+#cfg input{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;font:inherit;background:var(--bg);color:var(--ink);direction:ltr;text-align:left}
+#cfg small{display:block;color:var(--mute);margin-top:8px;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <b>Gemini</b>
+  <span><button id="clear" type="button">گفتگوی جدید</button><button id="gear" type="button">تنظیمات</button></span>
+</header>
+<div id="cfg">
+  <label for="key">کلید API (از aistudio.google.com/apikey)</label>
+  <input id="key" type="password" autocomplete="off" placeholder="AIza...">
+  <label for="model">مدل (قابل ویرایش)</label>
+  <input id="model" list="ml" value="gemini-2.5-flash">
+  <datalist id="ml"><option value="gemini-2.5-flash"><option value="gemini-2.5-flash-lite"><option value="gemini-2.5-pro"></datalist>
+  <small>کلید فقط روی همین گوشی ذخیره می‌شود و مستقیم به سرور Google ارسال می‌شود. در سطح رایگان ممکن است Google از پیام‌ها برای بهبود محصولاتش استفاده کند؛ اطلاعات حساس ننویسید.</small>
+</div>
+<div id="log"><div class="empty" id="empty">برای شروع، در تنظیمات کلید API را وارد کنید و پیام بنویسید.</div></div>
+<form id="f">
+  <textarea id="t" rows="1" dir="auto" placeholder="پیام..."></textarea>
+  <button id="send" type="submit">ارسال</button>
+</form>
+<script>
+(function(){
+  var $=function(i){return document.getElementById(i)};
+  var log=$('log'),t=$('t'),send=$('send'),key=$('key'),model=$('model'),cfg=$('cfg');
+  var history=[],busy=false;
+  function load(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function save(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  key.value=load('ck')||'';
+  model.value=load('cm')||'gemini-2.5-flash';
+  if(!key.value)cfg.className='open';
+  key.onchange=function(){save('ck',key.value.trim())};
+  model.onchange=function(){save('cm',model.value.trim())};
+  $('gear').onclick=function(){cfg.className=cfg.className?'':'open'};
+  $('clear').onclick=function(){history=[];log.innerHTML='<div class="empty">گفتگوی جدید شروع شد.</div>'};
+  t.oninput=function(){t.style.height='auto';t.style.height=Math.min(t.scrollHeight,140)+'px'};
+
+  function add(cls,text){
+    var e=$('empty');if(e&&e.parentNode)e.parentNode.removeChild(e);
+    var d=document.createElement('div');
+    d.className='msg '+cls;d.setAttribute('dir','auto');d.textContent=text;
+    log.appendChild(d);log.scrollTop=log.scrollHeight;return d;
+  }
+
+  $('f').onsubmit=function(ev){
+    ev.preventDefault();
+    var text=t.value.trim();
+    var k=key.value.trim();
+    if(!text||busy)return;
+    if(!k){cfg.className='open';add('err','ابتدا کلید API را وارد کنید.');return}
+    save('ck',k);
+    busy=true;send.disabled=true;
+    add('me',text);t.value='';t.style.height='auto';
+    history.push({role:'user',content:text});
+    var wait=add('bot','...');
+    var contents=[];
+    for(var i=0;i<history.length;i++){contents.push({role:history[i].role==='user'?'user':'model',parts:[{text:history[i].content}]})}
+    fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model.value.trim())+':generateContent',{
+      method:'POST',
+      headers:{'content-type':'application/json','x-goog-api-key':k},
+      body:JSON.stringify({contents:contents})
+    }).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
+    .then(function(x){
+      if(!x.ok){throw new Error((x.j&&x.j.error&&x.j.error.message)||'خطای ناشناخته')}
+      var out='',c=x.j.candidates&&x.j.candidates[0];
+      if(c&&c.content&&c.content.parts){for(var i=0;i<c.content.parts.length;i++){out+=c.content.parts[i].text||''}}
+      if(!out){throw new Error(x.j.promptFeedback&&x.j.promptFeedback.blockReason?'پاسخ مسدود شد: '+x.j.promptFeedback.blockReason:'پاسخ خالی بود')}
+      wait.textContent=out;
+      history.push({role:'assistant',content:out});
+    })
+    .catch(function(e){
+      history.pop();
+      wait.className='msg err';
+      wait.textContent='ارسال نشد: '+e.message+'\n(اگر خطای شبکه است، دسترسی به generativelanguage.googleapis.com از اینترنت شما ممکن نیست.)';
+    })
+    .then(function(){busy=false;send.disabled=false;log.scrollTop=log.scrollHeight});
+  };
+})();
+</script>
+</body>
+</html>
